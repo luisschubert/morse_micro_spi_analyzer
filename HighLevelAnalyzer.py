@@ -143,9 +143,11 @@ class Hla(HighLevelAnalyzer):
             window['config'] = value
     
     def is_window_known(self, function):
-        '''Check if all window registers are known for a function'''
+        '''Check if window registers needed for address calculation are known'''
         window = self.func1_window if function == 1 else self.func2_window
-        return all(v is not None for v in window.values())
+        # Only window_0 and window_1 are needed for address calculation
+        # config is just metadata about access size
+        return window['window_0'] is not None and window['window_1'] is not None
     
     def calculate_full_address(self, function, sdio_address):
         '''Calculate 32-bit address from window state + SDIO address'''
