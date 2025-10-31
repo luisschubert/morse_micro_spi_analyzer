@@ -1,5 +1,82 @@
 # Changelog
 
+## Version 0.3.0 - IRQ Bit Decoding Added
+
+### New Features
+
+**Automatic IRQ Status Decoding**
+- Decodes the 32-bit INT1_STS register value into human-readable interrupt sources
+- Displays active interrupt bits for both IRQ reads and clears
+- Shows which pagers, beacons, and other interrupt sources are active
+
+### IRQ Bit Definitions
+- **Bits 0-13**: Pager interrupts (data RX or TX buffer returns)
+- **Bit 15**: TX status available (bypass mode)
+- **Bits 17-24**: Beacon VIF interrupts (VIF 0-7)
+- **Bits 25-26**: NDP probe request interrupts (VIF 0-1)
+- **Bit 27**: Hardware stop notification
+
+### Updated Output Formats
+
+**Before:**
+```
+IRQ RD: Registers/Control (≤4B) | 0x6050
+IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0xFE04)
+```
+
+**After (with IRQ bit decoding):**
+```
+IRQ RD: Registers/Control (≤4B) | 0x6050 [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]
+IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0x000004FE) [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]
+```
+
+### Enhanced Features
+
+1. **IRQ Status Analysis**
+   - See which pagers are active during each interrupt
+   - Identify beacon and NDP probe interrupts
+   - Detect hardware stop notifications
+   
+2. **Debugging Support**
+   - Quickly understand what triggered an interrupt
+   - Correlate IRQ activity with data transfers
+   - Identify unexpected interrupt patterns
+
+### Documentation Updates
+
+- **README.md**: Added IRQ bit decoding section with examples
+- **test_decoder.py**: Added IRQ bit decoding validation
+- **HighLevelAnalyzer.py**: Added `_decode_irq_bits()` method
+
+### Technical Changes
+
+**HighLevelAnalyzer.py:**
+- Added `_decode_irq_bits()` function to parse 32-bit IRQ values
+- Enhanced IRQ read/clear handlers to extract and decode MISO data
+- Updated result format strings to include IRQ bit information
+
+### Why This Matters
+
+Understanding IRQ status helps with:
+1. **Performance Analysis**: See which interrupt sources dominate
+2. **Debugging**: Identify stuck or unexpected interrupts
+3. **Driver Understanding**: Correlate interrupts with TX/RX activity
+4. **System Behavior**: Observe beacon timing and pager activity patterns
+
+### Example Interpretation
+
+When you see:
+```
+IRQ RD: Registers/Control (≤4B) | 0x6050 [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]
+```
+
+You now know:
+- Multiple pagers (1-7, 10) have data ready or buffer returns available
+- This is a typical pattern during active data transfer
+- The driver will process these pagers in the work handler
+
+---
+
 ## Version 0.2.0 - Function Descriptions Added
 
 ### New Features

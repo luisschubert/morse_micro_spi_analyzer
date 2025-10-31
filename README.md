@@ -39,10 +39,10 @@ The analyzer decodes the SDIO-over-SPI protocol structure:
 
 ## Output Examples
 
-With function descriptions for clarity:
+With function descriptions and IRQ bit decoding:
 
-- `IRQ RD: Registers/Control (≤4B) | 0x6050`
-- `IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0xFE04)`
+- `IRQ RD: Registers/Control (≤4B) | 0x6050 [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]`
+- `IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0x000004FE) [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]`
 - `BULK RD: Bulk Data (>4B) | 0x9420 [1536 bytes] Block,Incr`
 - `CMD53 WR: Registers/Control (≤4B) | Addr:0x4200 Cnt:245 Byte,Incr`
 - `CARD: Card Control (CCCR) | Addr:0x0004 Write Cnt:1`
@@ -54,6 +54,18 @@ The analyzer automatically labels each function:
 - **Function 1**: Registers/Control (≤4B) - Used for register access and small transfers
 - **Function 2**: Bulk Data (>4B) - Used for large WiFi packet transfers
 
+### IRQ Bit Decoding
+
+The analyzer automatically decodes the 32-bit INT1_STS register into human-readable interrupt sources:
+
+- **Bits 0-13**: `Pager0` through `Pager13` - Data available or TX buffer returns for each pager
+- **Bit 15**: `TxStatus` - TX status available (bypass mode)
+- **Bits 17-24**: `Beacon0` through `Beacon7` - Beacon ready for VIF 0-7
+- **Bits 25-26**: `NDP0`, `NDP1` - NDP probe request for VIF 0-1  
+- **Bit 27**: `HW_STOP` - Hardware stop notification
+
+Example: `0x000004FE` decodes to `Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10`
+
 ## Development
 
-Based on analysis of Morse Micro driver (`morse_driver/spi.c`) and SDIO specification Part E1.
+Based on analysis of Morse Micro driver (`morse_driver/spi.c`, `morse_driver/hw.h`) and SDIO specification Part E1.

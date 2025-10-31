@@ -2,8 +2,8 @@
   "name": "Morse Micro MM6108 SPI Analyzer",
   "apiVersion": "1.0.0",
   "author": "Luis Schubert",
-  "version": "0.2.0",
-  "description": "High-level analyzer for decoding SDIO-over-SPI protocol used by Morse Micro MM6108 WiFi chips. Automatically identifies SDIO functions: Card Control (Fn0), Registers/Control (Fn1), and Bulk Data (Fn2).",
+  "version": "0.3.0",
+  "description": "High-level analyzer for decoding SDIO-over-SPI protocol used by Morse Micro MM6108 WiFi chips. Automatically identifies SDIO functions and decodes interrupt status bits for detailed system analysis.",
   "extensions": {
     "morse_micro_spi_analyzer": {
       "type": "HighLevelAnalyzer",

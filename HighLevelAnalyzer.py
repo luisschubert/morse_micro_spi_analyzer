@@ -23,10 +23,10 @@ class Hla(HighLevelAnalyzer):
             'format': 'BULK WR: {{data.func_desc}} | 0x{{data.address}} [{{data.count}} bytes] {{data.mode}}'
         },
         'irq_read': {
-            'format': 'IRQ RD: {{data.func_desc}} | 0x{{data.address}}'
+            'format': 'IRQ RD: {{data.func_desc}} | 0x{{data.address}} [{{data.irq_bits}}]'
         },
         'irq_clear': {
-            'format': 'IRQ CLR: {{data.func_desc}} | 0x{{data.address}} (val:0x{{data.value}})'
+            'format': 'IRQ CLR: {{data.func_desc}} | 0x{{data.address}} (val:0x{{data.value}}) [{{data.irq_bits}}]'
         },
         'card_control': {
             'format': 'CARD: {{data.func_desc}} | {{data.operation}}'
@@ -107,6 +107,44 @@ class Hla(HighLevelAnalyzer):
         
         return None
 
+    def _decode_irq_bits(self, irq_value):
+        '''Decode IRQ status bits into human-readable description'''
+        if irq_value == 0:
+            return "None"
+        
+        bits = []
+        
+        # Bits 0-13: Pager interrupts
+        for i in range(14):
+            if irq_value & (1 << i):
+                bits.append(f"Pager{i}")
+        
+        # Bit 15: TX status available
+        if irq_value & (1 << 15):
+            bits.append("TxStatus")
+        
+        # Bits 17-24: Beacon VIF interrupts
+        for i in range(17, 25):
+            if irq_value & (1 << i):
+                bits.append(f"Beacon{i-17}")
+        
+        # Bits 25-26: NDP probe request interrupts
+        if irq_value & (1 << 25):
+            bits.append("NDP0")
+        if irq_value & (1 << 26):
+            bits.append("NDP1")
+        
+        # Bit 27: HW stop notification
+        if irq_value & (1 << 27):
+            bits.append("HW_STOP")
+        
+        # Bits 28-31: Reserved/unknown
+        for i in range(28, 32):
+            if irq_value & (1 << i):
+                bits.append(f"Bit{i}")
+        
+        return ",".join(bits) if bits else "Unknown"
+
     def _decode_transaction(self):
         '''Decode a complete SPI transaction'''
         
@@ -158,13 +196,12 @@ class Hla(HighLevelAnalyzer):
             func_desc = self.FUNC_DESCRIPTIONS.get(function, f"Fn{function}")
             
             # Extract MISO response data if available
+            # After CMD53 (7 bytes), there's typically 4 bytes of response/padding, 
+            # then the actual data starts at offset 11
             miso_data = None
-            if len(self.miso_buffer) > cmd_start + 10:
-                # Look for response data (skip FF padding)
-                for i in range(cmd_start + 7, min(len(self.miso_buffer), cmd_start + 26)):
-                    if self.miso_buffer[i] != 0xFF:
-                        miso_data = self.miso_buffer[i:min(i+4, len(self.miso_buffer))]
-                        break
+            if len(self.miso_buffer) >= cmd_start + 15:
+                # Data typically starts at cmd_start + 11
+                miso_data = self.miso_buffer[cmd_start + 11:cmd_start + 15]
             
             # Special handling for Function 0 (Card Control)
             if function == 0:
@@ -180,18 +217,31 @@ class Hla(HighLevelAnalyzer):
             
             # Check for known register addresses
             if address == self.INT1_STS:
+                # Decode IRQ status bits from MISO
+                irq_bits_str = "N/A"
+                if miso_data and len(miso_data) >= 4:
+                    # IRQ status is 32-bit value in MISO (little-endian in response)
+                    irq_value = (miso_data[3] << 24) | (miso_data[2] << 16) | (miso_data[1] << 8) | miso_data[0]
+                    irq_bits_str = self._decode_irq_bits(irq_value)
                 return AnalyzerFrame('irq_read', self.transaction_start, self.transaction_end, {
                     'address': f'{address:04X}',
-                    'func_desc': func_desc
+                    'func_desc': func_desc,
+                    'irq_bits': irq_bits_str
                 })
             elif address == self.INT1_CLR:
+                # Get value being written from MISO (echoed back)
                 value_str = 'N/A'
-                if miso_data and len(miso_data) >= 2:
-                    value_str = ''.join([f'{b:02X}' for b in miso_data[:2]])
+                irq_bits_str = "N/A"
+                if miso_data and len(miso_data) >= 4:
+                    # IRQ clear value is 32-bit (little-endian)
+                    irq_value = (miso_data[3] << 24) | (miso_data[2] << 16) | (miso_data[1] << 8) | miso_data[0]
+                    value_str = f'{irq_value:08X}'
+                    irq_bits_str = self._decode_irq_bits(irq_value)
                 return AnalyzerFrame('irq_clear', self.transaction_start, self.transaction_end, {
                     'address': f'{address:04X}',
                     'func_desc': func_desc,
-                    'value': value_str
+                    'value': value_str,
+                    'irq_bits': irq_bits_str
                 })
             
             # Check if this is a data buffer address or Function 2 (always bulk)

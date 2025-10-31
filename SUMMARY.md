@@ -14,10 +14,11 @@ The analyzer automatically decodes SPI transactions and identifies:
    - **Function 2 (Bulk Data)**: Large WiFi packet transfers (>4 bytes)
    - Shows descriptive labels for each function type
 
-2. **IRQ Operations (Function 1)**
+2. **IRQ Operations with Bit Decoding (Function 1)**
    - Status reads (INT1_STS @ 0x6050)
    - Status clears (INT1_CLR @ 0x6058)
-   - Shows the value being written to clear register
+   - **Automatic decoding of 32-bit IRQ status into active interrupt sources**
+   - Shows pager interrupts (bits 0-13), TX status (bit 15), beacons (bits 17-24), NDP probes (bits 25-26), and HW stop (bit 27)
 
 3. **Bulk Data Transfers (Function 2)**
    - Identifies large WiFi packet transfers
@@ -47,19 +48,23 @@ The analyzer has been validated against known transactions from your captures:
 
 ### Test Case A1/B1: IRQ Status Read
 ```
-Input:  FF 75 14 C0 A0 04 89 ...
-Output: "IRQ RD: Registers/Control (≤4B) | 0x6050"
+Input MOSI:  FF 75 14 C0 A0 04 89 ...
+Input MISO:  FF FF FF FF FF FF FF FF 00 00 FF FE 04 00 00 00 CA F1 FF FF ...
+Output: "IRQ RD: Registers/Control (≤4B) | 0x6050 [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]"
 ✓ Correctly identifies INT1_STS read
 ✓ Shows Function 1 (Registers/Control)
+✓ Decodes IRQ value 0x000004FE into active pager bits
 ```
 
 ### Test Case A2/B2: IRQ Clear
 ```
-Input:  FF 75 94 C0 B0 04 CD ...
-Output: "IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0xFE04)"
+Input MOSI:  FF 75 94 C0 B0 04 CD ...
+Input MISO:  FF FF FF FF FF FF FF FF 00 00 FF FE 04 00 00 00 CA F1 FF E5 ...
+Output: "IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0x000004FE) [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]"
 ✓ Correctly identifies INT1_CLR write
 ✓ Extracts value from MISO data
 ✓ Shows Function 1 (Registers/Control)
+✓ Decodes cleared IRQ bits showing which interrupts were acknowledged
 ```
 
 ### Test Case A3/B3: Data Buffer Access

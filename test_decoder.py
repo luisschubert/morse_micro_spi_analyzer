@@ -72,6 +72,44 @@ def decode_cmd53(mosi_bytes):
     }
 
 
+def decode_irq_bits(irq_value):
+    """Decode IRQ status bits into human-readable description"""
+    if irq_value == 0:
+        return "None"
+    
+    bits = []
+    
+    # Bits 0-13: Pager interrupts
+    for i in range(14):
+        if irq_value & (1 << i):
+            bits.append(f"Pager{i}")
+    
+    # Bit 15: TX status available
+    if irq_value & (1 << 15):
+        bits.append("TxStatus")
+    
+    # Bits 17-24: Beacon VIF interrupts
+    for i in range(17, 25):
+        if irq_value & (1 << i):
+            bits.append(f"Beacon{i-17}")
+    
+    # Bits 25-26: NDP probe request interrupts
+    if irq_value & (1 << 25):
+        bits.append("NDP0")
+    if irq_value & (1 << 26):
+        bits.append("NDP1")
+    
+    # Bit 27: HW stop notification
+    if irq_value & (1 << 27):
+        bits.append("HW_STOP")
+    
+    # Bits 28-31: Reserved/unknown
+    for i in range(28, 32):
+        if irq_value & (1 << i):
+            bits.append(f"Bit{i}")
+    
+    return ",".join(bits) if bits else "Unknown"
+
 def get_func_description(func_num):
     """Get function description"""
     descriptions = {
@@ -81,10 +119,12 @@ def get_func_description(func_num):
     }
     return descriptions.get(func_num, f"Fn{func_num}")
 
-def print_decode(label, mosi_bytes):
+def print_decode(label, mosi_bytes, miso_bytes=None):
     """Print decoded information for a transaction"""
     print(f"\n{label}:")
     print(f"  Raw MOSI: {' '.join([f'{b:02X}' for b in mosi_bytes[:10]])}{'...' if len(mosi_bytes) > 10 else ''}")
+    if miso_bytes:
+        print(f"  Raw MISO: {' '.join([f'{b:02X}' for b in miso_bytes[:20]])}{'...' if len(miso_bytes) > 20 else ''}")
     
     result = decode_cmd53(mosi_bytes)
     if result:
@@ -99,6 +139,16 @@ def print_decode(label, mosi_bytes):
         print(f"  Count: {result['count']}")
         print(f"  Mode: {result['mode_str']}")
         print(f"  CRC: 0x{result['crc']:02X}")
+        
+        # Decode IRQ bits if this is an IRQ register access
+        if result['reg_name'] in ['INT1_STS', 'INT1_CLR'] and miso_bytes:
+            # Data typically starts at position 11 (after 7 bytes cmd + 4 bytes response/padding)
+            if len(miso_bytes) >= 15:
+                miso_data = miso_bytes[11:15]
+                irq_value = (miso_data[3] << 24) | (miso_data[2] << 16) | (miso_data[1] << 8) | miso_data[0]
+                irq_bits_str = decode_irq_bits(irq_value)
+                print(f"  IRQ Value: 0x{irq_value:08X}")
+                print(f"  IRQ Bits: {irq_bits_str}")
     else:
         print("  Could not decode")
 
@@ -108,13 +158,15 @@ print("=" * 60)
 print("Testing transactions from morse_question.md")
 print("=" * 60)
 
-# A1 - IRQ Status Read
-a1_mosi = [0xFF, 0x75, 0x14, 0xC0, 0xA0, 0x04, 0x89, 0xFF, 0xFF, 0xFF]
-print_decode("A1 (IRQ Status Read)", a1_mosi)
+# A1 - IRQ Status Read (with MISO showing IRQ status)
+a1_mosi = [0xFF, 0x75, 0x14, 0xC0, 0xA0, 0x04, 0x89, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+a1_miso = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFE, 0x04, 0x00, 0x00, 0x00, 0xCA, 0xF1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+print_decode("A1 (IRQ Status Read)", a1_mosi, a1_miso)
 
-# A2 - IRQ Clear
-a2_mosi = [0xFF, 0x75, 0x94, 0xC0, 0xB0, 0x04, 0xCD, 0xFF, 0xFF, 0xFF]
-print_decode("A2 (IRQ Clear)", a2_mosi)
+# A2 - IRQ Clear (with MISO echoing the cleared value)
+a2_mosi = [0xFF, 0x75, 0x94, 0xC0, 0xB0, 0x04, 0xCD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+a2_miso = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFE, 0x04, 0x00, 0x00, 0x00, 0xCA, 0xF1, 0xFF, 0xE5, 0x0F, 0xFF]
+print_decode("A2 (IRQ Clear)", a2_mosi, a2_miso)
 
 print("\n" + "=" * 60)
 print("Testing transactions from morse_question_spi_rk3588.md")

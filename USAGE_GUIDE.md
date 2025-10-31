@@ -32,12 +32,15 @@ The analyzer will decode and label transactions automatically with function desc
 #### IRQ Operations
 - **IRQ RD**: Reading the interrupt status register (0x6050)
   ```
-  IRQ RD: Registers/Control (≤4B) | 0x6050
+  IRQ RD: Registers/Control (≤4B) | 0x6050 [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]
   ```
+  The analyzer automatically decodes the 32-bit IRQ value showing which interrupt sources are active.
+  
 - **IRQ CLR**: Clearing interrupt flags (0x6058)
   ```
-  IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0xFE04)
+  IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0x000004FE) [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]
   ```
+  Shows both the raw hex value and the decoded interrupt bits being cleared.
 
 #### Bulk Data Transfers (Function 2)
 - **BULK RD**: Large data reads from buffer addresses
@@ -77,6 +80,12 @@ Each transaction shows:
 - **Mode**: 
   - Block/Byte: Transfer mode (Block = 512 bytes, Byte = 1 byte)
   - Incr/Fixed: Address increment (Incr = sequential memory, Fixed = FIFO)
+- **IRQ Bits** (for INT1_STS/INT1_CLR only): Decoded interrupt sources
+  - **Pager0-13**: Data available or TX buffer returns for each pager
+  - **TxStatus**: TX status available (bypass mode)
+  - **Beacon0-7**: Beacon ready for VIF 0-7
+  - **NDP0-1**: NDP probe request for VIF 0-1
+  - **HW_STOP**: Hardware stop notification
 
 ## Analyzing Patterns
 
@@ -100,23 +109,33 @@ Each transaction shows:
 
 **Normal IRQ Handling (Function 1):**
 ```
-IRQ RD: Registers/Control (≤4B) | 0x6050
-IRQ CLR: Registers/Control (≤4B) | 0x6058
+IRQ RD: Registers/Control (≤4B) | 0x6050 [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]
+IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0x000004FE) [Pager1,Pager2,Pager3,Pager4,Pager5,Pager6,Pager7,Pager10]
 ```
+*Interpretation*: Multiple pagers (1-7, 10) have data ready. These will be processed by the driver's work handler.
 
 **Receive Data Pattern (Function 1 → Function 2):**
 ```
-IRQ RD: Registers/Control (≤4B) | 0x6050          (Fn1: Check status)
-IRQ CLR: Registers/Control (≤4B) | 0x6058         (Fn1: Clear IRQ)
-BULK RD: Bulk Data (>4B) | 0x9420 [1536 bytes]   (Fn2: Read packet)
+IRQ RD: Registers/Control (≤4B) | 0x6050 [Pager2,Pager5]          (Fn1: Check status - Pagers 2,5 active)
+IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0x00000024) [Pager2,Pager5]   (Fn1: Clear IRQ)
+BULK RD: Bulk Data (>4B) | 0x9420 [1536 bytes] Block,Incr   (Fn2: Read packet from pager)
 ```
+*Interpretation*: IRQ triggered by pagers 2 and 5. Driver reads status, clears interrupts, then processes data.
 
 **Transmit Pattern (Function 2 → Function 1):**
 ```
-BULK WR: Bulk Data (>4B) | 0xC310 [512 bytes]    (Fn2: Write packet)
-IRQ RD: Registers/Control (≤4B) | 0x6050          (Fn1: Check status)
-IRQ CLR: Registers/Control (≤4B) | 0x6058         (Fn1: Clear IRQ)
+BULK WR: Bulk Data (>4B) | 0xC310 [512 bytes] Block,Incr    (Fn2: Write packet)
+IRQ RD: Registers/Control (≤4B) | 0x6050 [TxStatus]          (Fn1: Check status - TX complete)
+IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0x00008000) [TxStatus]   (Fn1: Clear TX status IRQ)
 ```
+*Interpretation*: TX status interrupt (bit 15) indicates transmission completed. Driver acknowledges and can send next packet.
+
+**Beacon Pattern:**
+```
+IRQ RD: Registers/Control (≤4B) | 0x6050 [Beacon0,Pager1]
+IRQ CLR: Registers/Control (≤4B) | 0x6058 (val:0x00020002) [Beacon0,Pager1]
+```
+*Interpretation*: Beacon for VIF 0 (bit 17) is ready along with data on pager 1.
 
 **Initialization (Function 0):**
 ```
