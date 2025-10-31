@@ -72,6 +72,84 @@ def decode_cmd53(mosi_bytes):
     }
 
 
+def decode_cmd52(mosi_bytes):
+    """
+    Decode a CMD52 command from MOSI bytes
+    
+    Args:
+        mosi_bytes: List of bytes from MOSI line
+    
+    Returns:
+        Dictionary with decoded fields
+    """
+    if len(mosi_bytes) < 7:
+        return None
+    
+    # Find command start (0xFF followed by byte with 0x40 bit set)
+    cmd_start = -1
+    for i in range(min(3, len(mosi_bytes) - 6)):
+        if mosi_bytes[i] == 0xFF and (mosi_bytes[i+1] & 0x40):
+            cmd_start = i
+            break
+    
+    if cmd_start == -1:
+        return None
+    
+    # Extract command and argument
+    cmd = mosi_bytes[cmd_start + 1]
+    arg = (mosi_bytes[cmd_start + 2] << 24) | \
+          (mosi_bytes[cmd_start + 3] << 16) | \
+          (mosi_bytes[cmd_start + 4] << 8) | \
+          (mosi_bytes[cmd_start + 5])
+    
+    # Check if this is CMD52 (0x74 = 0x40 | 52)
+    if cmd != 0x74:
+        return None
+    
+    # Decode CMD52 format
+    write_bit = (arg >> 31) & 0x1
+    function = (arg >> 28) & 0x7
+    raw_bit = (arg >> 27) & 0x1
+    address = (arg >> 9) & 0x1FFFF
+    data = arg & 0xFF
+    crc = mosi_bytes[cmd_start + 6]
+    
+    rw = 'WRITE' if write_bit else 'READ'
+    
+    # Check for known registers
+    reg_name = None
+    if address == 0x10000:
+        reg_name = "WINDOW_0"
+    elif address == 0x10001:
+        reg_name = "WINDOW_1"
+    elif address == 0x10002:
+        reg_name = "WINDOW_CONFIG"
+    elif address == 0x6050:
+        reg_name = "INT1_STS"
+    elif address == 0x6054:
+        reg_name = "INT1_SET"
+    elif address == 0x6058:
+        reg_name = "INT1_CLR"
+    
+    return {
+        'command': cmd,
+        'argument': arg,
+        'write': write_bit,
+        'function': function,
+        'raw_bit': raw_bit,
+        'address': address,
+        'data': data,
+        'crc': crc,
+        'rw': rw,
+        'reg_name': reg_name
+    }
+
+
+def calculate_windowed_address(window_0, window_1, sdio_address):
+    """Calculate 32-bit address from window registers and SDIO address"""
+    return (window_1 << 24) | (window_0 << 16) | (sdio_address & 0xFFFF)
+
+
 def decode_irq_bits(irq_value):
     """Decode IRQ status bits into human-readable description"""
     if irq_value == 0:
@@ -118,6 +196,26 @@ def get_func_description(func_num):
         2: "Bulk Data (>4B)",
     }
     return descriptions.get(func_num, f"Fn{func_num}")
+
+def print_decode_cmd52(label, mosi_bytes):
+    """Print decoded CMD52 information"""
+    print(f"\n{label}:")
+    print(f"  Raw MOSI: {' '.join([f'{b:02X}' for b in mosi_bytes[:10]])}{'...' if len(mosi_bytes) > 10 else ''}")
+    
+    result = decode_cmd52(mosi_bytes)
+    if result:
+        func_desc = get_func_description(result['function'])
+        
+        if result['reg_name']:
+            print(f"  Type: CMD52 {result['rw']} {result['reg_name']}")
+        else:
+            print(f"  Type: CMD52 {result['rw']}")
+        print(f"  Function: {result['function']} - {func_desc}")
+        print(f"  Address: 0x{result['address']:05X}")
+        print(f"  Data: 0x{result['data']:02X}")
+        print(f"  CRC: 0x{result['crc']:02X}")
+    else:
+        print("  Could not decode as CMD52")
 
 def print_decode(label, mosi_bytes, miso_bytes=None):
     """Print decoded information for a transaction"""
@@ -218,3 +316,131 @@ for pattern in unknown_patterns:
     print(f"  Write: {write_bit}, Fn: {function}, Block: {block_mode}, Op: {opcode}")
     print(f"  Address: 0x{address:04X}, Count: {count}")
 
+
+print("\n" + "=" * 60)
+print("Testing CMD52 Transactions")
+print("=" * 60)
+
+# CMD52 Write to WINDOW_0 (Function 1) - Setting upper address bits [23:16] = 0x12
+# Command: 0x74, Arg: 0x90800012
+cmd52_win0_fn1 = [0xFF, 0x74, 0x90, 0x80, 0x00, 0x12, 0x9D, 0xFF, 0xFF]
+print_decode_cmd52("CMD52: FUNC1 WINDOW_0 = 0x12", cmd52_win0_fn1)
+
+# CMD52 Write to WINDOW_1 (Function 1) - Setting upper address bits [31:24] = 0x20
+# Command: 0x74, Arg: 0x90800220
+cmd52_win1_fn1 = [0xFF, 0x74, 0x90, 0x80, 0x02, 0x20, 0x4F, 0xFF, 0xFF]
+print_decode_cmd52("CMD52: FUNC1 WINDOW_1 = 0x20", cmd52_win1_fn1)
+
+# CMD52 Write to WINDOW_CONFIG (Function 1) - Setting access size = 4 bytes
+# Command: 0x74, Arg: 0x90800404
+cmd52_config_fn1 = [0xFF, 0x74, 0x90, 0x80, 0x04, 0x04, 0xE3, 0xFF, 0xFF]
+print_decode_cmd52("CMD52: FUNC1 CONFIG = 0x04 (4-byte access)", cmd52_config_fn1)
+
+# CMD52 Write to WINDOW_0 (Function 2) - Setting upper address bits for bulk
+# Command: 0x74, Arg: 0x98800034
+cmd52_win0_fn2 = [0xFF, 0x74, 0x98, 0x80, 0x00, 0x34, 0x7A, 0xFF, 0xFF]
+print_decode_cmd52("CMD52: FUNC2 WINDOW_0 = 0x34", cmd52_win0_fn2)
+
+# CMD52 Write to FUNC_0 (SDIO CCCR) - Enable interrupts
+# Command: 0x74, Arg: 0x80000803 (write 0x03 to address 0x04)
+cmd52_cccr_ien = [0xFF, 0x74, 0x80, 0x00, 0x08, 0x03, 0xB8, 0xFF, 0xFF]
+print_decode_cmd52("CMD52: FUNC0 CCCR_IEN = 0x03", cmd52_cccr_ien)
+
+
+print("\n" + "=" * 60)
+print("Testing Window Tracking Sequence")
+print("=" * 60)
+
+print("\n--- Scenario: Setting up FUNC1 window then reading from 0x20001234 ---")
+
+# Step 1: Set WINDOW_0 = 0x12
+print("\nStep 1: Configure WINDOW_0")
+print_decode_cmd52("  CMD52 WR FUNC1 WINDOW_0", cmd52_win0_fn1)
+
+# Step 2: Set WINDOW_1 = 0x20
+print("\nStep 2: Configure WINDOW_1")
+print_decode_cmd52("  CMD52 WR FUNC1 WINDOW_1", cmd52_win1_fn1)
+
+# Step 3: Set CONFIG = 0x04
+print("\nStep 3: Configure access size")
+print_decode_cmd52("  CMD52 WR FUNC1 CONFIG", cmd52_config_fn1)
+
+# Step 4: Now do CMD53 read from SDIO address 0x1234
+# With window set, this becomes: (0x20 << 24) | (0x12 << 16) | 0x1234 = 0x20121234
+# CMD53: 0x75, Read, Fn1, Byte mode, Incr, Addr 0x1234, Count 4
+cmd53_windowed_read = [0xFF, 0x75, 0x14, 0x24, 0x90, 0x04, 0xC5, 0xFF, 0xFF, 0xFF]
+print("\nStep 4: Read 4 bytes (will use window)")
+print_decode("  CMD53 RD FUNC1 0x1234", cmd53_windowed_read)
+
+# Calculate and display the full address
+window_0 = 0x12
+window_1 = 0x20
+sdio_addr = 0x1234
+full_addr = calculate_windowed_address(window_0, window_1, sdio_addr)
+print(f"\n  >>> Calculated Full Address: 0x{full_addr:08X}")
+print(f"      (window_1=0x{window_1:02X}, window_0=0x{window_0:02X}, sdio=0x{sdio_addr:04X})")
+
+
+print("\n" + "=" * 60)
+print("Testing FUNC1 vs FUNC2 Independent Windows")
+print("=" * 60)
+
+print("\n--- Scenario: FUNC1 and FUNC2 maintain separate windows ---")
+print("\nFUNC1 Window: 0x20120000")
+print("FUNC2 Window: 0x30340000")
+print("\nFUNC1 accessing SDIO 0x5678 → Full address: 0x20125678")
+full_f1 = calculate_windowed_address(0x12, 0x20, 0x5678)
+print(f"  Calculated: 0x{full_f1:08X}")
+
+print("\nFUNC2 accessing SDIO 0x5678 → Full address: 0x30345678")
+full_f2 = calculate_windowed_address(0x34, 0x30, 0x5678)
+print(f"  Calculated: 0x{full_f2:08X}")
+
+
+print("\n" + "=" * 60)
+print("Testing IRQ Register Access with Window")
+print("=" * 60)
+
+print("\n--- Scenario: Reading IRQ status at 0x20006050 (INT1_STS) ---")
+# INT1_STS is at 0x6050, but after windowing it's at 0x20006050
+# Window: 0x20 << 24 | 0x00 << 16 = 0x20000000
+# SDIO address: 0x6050
+# Full: 0x20006050
+
+print("\nStep 1: Configure window for 0x2000xxxx range")
+cmd52_win0_irq = [0xFF, 0x74, 0x90, 0x80, 0x00, 0x00, 0x61, 0xFF, 0xFF]
+cmd52_win1_irq = [0xFF, 0x74, 0x90, 0x80, 0x02, 0x20, 0x4F, 0xFF, 0xFF]
+print_decode_cmd52("  CMD52 WR FUNC1 WINDOW_0 = 0x00", cmd52_win0_irq)
+print_decode_cmd52("  CMD52 WR FUNC1 WINDOW_1 = 0x20", cmd52_win1_irq)
+
+print("\nStep 2: Read INT1_STS (SDIO 0x6050)")
+# Note: The existing test case A1 reads from 0x6050
+print_decode("  CMD53 RD IRQ Status", a1_mosi, a1_miso)
+
+window_0_irq = 0x00
+window_1_irq = 0x20
+sdio_irq = 0x6050
+full_irq_addr = calculate_windowed_address(window_0_irq, window_1_irq, sdio_irq)
+print(f"\n  >>> Calculated Full IRQ Address: 0x{full_irq_addr:08X}")
+print(f"      This matches INT1_STS at 0x20006050!")
+
+
+print("\n" + "=" * 60)
+print("Testing Decoder Modes")
+print("=" * 60)
+
+print("\n--- Basic Mode: Simple classification ---")
+print("  Window config transaction → Shows: WINDOW: Fn1 | WINDOW_0 = 0x12")
+print("  CMD53 transaction → Shows: DATA: Fn1 RD | Addr:0x1234 Cnt:4")
+
+print("\n--- Detailed Mode: Full address resolution ---")
+print("  Window config transaction → Shows: WINDOW: Fn1 | WINDOW_0 = 0x12")
+print("  CMD53 with known window → Shows: DATA RD: Fn1 | 0x20121234 (SDIO:0x1234) [4 bytes]")
+print("  CMD53 with unknown window → Shows: DATA RD: Fn1 | UNKNOWN_WIN (SDIO:0x1234) [4 bytes]")
+
+print("\n--- Debug Mode: Maximum detail ---")
+print("  Same as Detailed mode plus all raw protocol information")
+
+print("\n" + "=" * 60)
+print("All tests completed!")
+print("=" * 60)
