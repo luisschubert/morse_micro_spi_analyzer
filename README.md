@@ -2,6 +2,8 @@
 
 High-level analyzer extension for Saleae Logic 2 to decode SDIO-over-SPI protocol used by Morse Micro MM6108 WiFi chips.
 
+![Overview of Protocol Decoding](ref/img/overview.png)
+
 ## Features
 
 - Decodes SDIO CMD53 commands (read/write operations)
@@ -15,6 +17,8 @@ High-level analyzer extension for Saleae Logic 2 to decode SDIO-over-SPI protoco
 2. Add an SPI analyzer to your capture
 3. Add this High Level Analyzer on top of the SPI analyzer
 4. Configure settings if needed (Basic vs Detailed mode)
+
+![Enable the Analyzer](ref/img/enable.png)
 
 ## Protocol Details
 
